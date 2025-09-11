@@ -1,8 +1,21 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 
+from src.core.settings import settings
+from src.db.database import ping_db
+
 app = FastAPI(title="Fitness Gen API")
+
+# Middleware CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[settings.ALLOWED_ORIGINS],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Modelo de dados da avaliação do aluno
 class Assessment(BaseModel):
@@ -28,12 +41,19 @@ class ExercisePlan(BaseModel):
 def read_root():
     return {"message": "Projeto Fitness Genativo ativo!"}
 
+@app.get("/healthz")
+def health_check():
+    """
+    Verifica se a API está no ar e se a conexão com o banco funciona.
+    """
+    return {"status": "ok", "database": ping_db()}
+
 @app.post("/generate-plan", response_model=List[ExercisePlan])
 def generate_plan(assessment: Assessment):
     """
     Endpoint que recebe a avaliação do aluno e retorna um plano de treino mock.
     """
-    # Mock de exercícios - depois será substituído pelo ML + LLM
+    # Mock de exercícios - depois será substituído por ML + LLM
     mock_plan = [
         ExercisePlan(
             exercise="Agachamento",

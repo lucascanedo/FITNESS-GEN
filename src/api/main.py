@@ -6,6 +6,11 @@ from typing import List, Optional
 from src.core.settings import settings
 from src.db.database import ping_db
 
+# 👇 IMPORTANTE: importa o router 
+from src.api.routes.students import router as students_router
+from src.api.routes.measurements import router as measurements_router
+
+
 app = FastAPI(title="Fitness Gen API")
 
 # Middleware CORS
@@ -17,7 +22,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Modelo de dados da avaliação do aluno
+# Modelo de dados da avaliação do aluno (ainda usado pelo mock)
 class Assessment(BaseModel):
     name: str
     age: int
@@ -78,3 +83,7 @@ def generate_plan(assessment: Assessment):
         ),
     ]
     return mock_plan
+
+# 👇 REGISTRA AS ROTAS DE STUDENTS
+app.include_router(students_router)
+app.include_router(measurements_router)

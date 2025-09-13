@@ -1,3 +1,4 @@
+# src/api/routes/students.py
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -5,7 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from typing import List, Optional
 
 from src.db.database import get_db
-from src.api.schemas.students import StudentCreate, StudentOut
+from src.api.schemas.students import StudentCreate, StudentOut, StudentUpdate
 
 router = APIRouter(prefix="/students", tags=["students"])
 
@@ -109,31 +110,33 @@ def lookup_student(
     return dict(row)
 
 # --------------------------
-# Update (por id OU cpf)
+# Update (parcial) por id OU cpf
 # --------------------------
 @router.put("/update", response_model=StudentOut)
 def update_student_by_id_or_cpf(
-    payload: StudentCreate,
+    payload: StudentUpdate,
     id: int | None = Query(default=None),
     cpf: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
     """
     Atualiza usando id OU cpf (se ambos vierem, prioriza id).
-    Não permite alterar CPF: mantemos o CPF atual do banco.
+    Edição parcial: envia só o que quer mudar.
+    Não permite alterar CPF (mantemos o atual do banco).
     """
     current = _get_student_by_id_or_cpf(db, id, cpf)
-    data = payload.model_dump()
-    data["cpf"] = current["cpf"]  # força manter CPF atual
+
+    # apenas campos enviados (evita sobrescrever com None acidental)
+    data = payload.model_dump(exclude_unset=True)
 
     try:
         row = db.execute(text("""
             UPDATE students
-            SET name = :name,
-                birth_date = :birth_date,
-                sex = :sex,
-                email = :email,
-                phone = :phone
+            SET name       = COALESCE(:name, name),
+                birth_date = COALESCE(:birth_date, birth_date),
+                sex        = COALESCE(:sex, sex),
+                email      = COALESCE(:email, email),
+                phone      = COALESCE(:phone, phone)
             WHERE id = :id
             RETURNING id, cpf, name, birth_date, age, sex, email, phone, created_at;
         """), {**data, "id": current["id"]}).mappings().one()

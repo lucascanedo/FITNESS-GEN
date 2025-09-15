@@ -10,6 +10,7 @@ from src.db.database import ping_db
 from src.api.routes.students import router as students_router
 from src.api.routes.measurements import router as measurements_router
 from src.api.routes.assessments import router as assessments_router
+from src.api.routes.plans import router as plans_router
 
 
 app = FastAPI(title="Fitness Gen API")
@@ -89,3 +90,4 @@ def generate_plan(assessment: Assessment):
 app.include_router(students_router)
 app.include_router(measurements_router)
 app.include_router(assessments_router)
+app.include_router(plans_router)

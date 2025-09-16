@@ -1,93 +1,56 @@
+# src/api/main.py
+from __future__ import annotations
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import List, Optional
 
 from src.core.settings import settings
 from src.db.database import ping_db
 
-# 👇 IMPORTANTE: importa o router 
+# Routers
 from src.api.routes.students import router as students_router
 from src.api.routes.measurements import router as measurements_router
 from src.api.routes.assessments import router as assessments_router
 from src.api.routes.plans import router as plans_router
+from src.api.routes.llm import router as llm_router
+
+
+def _resolve_cors_origins() -> list[str]:
+    """
+    Converte settings.ALLOWED_ORIGINS em lista.
+    - Se for "*", libera todos.
+    - Se for string com vírgulas, split/strip.
+    """
+    ao = (settings.ALLOWED_ORIGINS or "*").strip()
+    if ao == "*" or ao.lower() == "all":
+        return ["*"]
+    return [o.strip() for o in ao.split(",") if o.strip()]
 
 
 app = FastAPI(title="Fitness Gen API")
 
-# Middleware CORS
+# CORS
+origins = _resolve_cors_origins()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.ALLOWED_ORIGINS],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Modelo de dados da avaliação do aluno (ainda usado pelo mock)
-class Assessment(BaseModel):
-    name: str
-    age: int
-    sex: str
-    weight: float
-    height: float
-    posture_issues: Optional[List[str]] = []
-    injuries: Optional[List[str]] = []
-    training_history: Optional[str] = None
-    goals: Optional[List[str]] = []
-
-# Modelo de retorno do plano de treino
-class ExercisePlan(BaseModel):
-    exercise: str
-    sets: int
-    reps: int
-    focus: str
-    explanation: str
-
 @app.get("/")
-def read_root():
-    return {"message": "Projeto Fitness Genativo ativo!"}
+def root():
+    return {"message": "Projeto Fitness Gen ativo!"}
 
 @app.get("/healthz")
 def health_check():
-    """
-    Verifica se a API está no ar e se a conexão com o banco funciona.
-    """
+    """Ping da API + status do banco."""
     return {"status": "ok", "database": ping_db()}
 
-@app.post("/generate-plan", response_model=List[ExercisePlan])
-def generate_plan(assessment: Assessment):
-    """
-    Endpoint que recebe a avaliação do aluno e retorna um plano de treino mock.
-    """
-    # Mock de exercícios - depois será substituído por ML + LLM
-    mock_plan = [
-        ExercisePlan(
-            exercise="Agachamento",
-            sets=3,
-            reps=12,
-            focus="Força de pernas",
-            explanation="O agachamento fortalece quadríceps e glúteos, ajuda a melhorar postura."
-        ),
-        ExercisePlan(
-            exercise="Remada Curvada",
-            sets=3,
-            reps=10,
-            focus="Costas",
-            explanation="Fortalece a musculatura das costas e melhora a postura, especialmente em casos de desvio postural leve."
-        ),
-        ExercisePlan(
-            exercise="Prancha",
-            sets=3,
-            reps=60,
-            focus="Core",
-            explanation="Melhora estabilidade do core, previne lesões e ajuda na postura."
-        ),
-    ]
-    return mock_plan
-
-# 👇 REGISTRA AS ROTAS DE STUDENTS
+# Registra routers
 app.include_router(students_router)
 app.include_router(measurements_router)
 app.include_router(assessments_router)
 app.include_router(plans_router)
+app.include_router(llm_router)

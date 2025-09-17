@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+pydantic
+sqlalchemy
+pandas
+numpy
+scikit-learn
+torch,
+streamlit,
+langchain,
+openai,
+mlflow,
+python-dotenv

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, field_serializer
+from pydantic import BaseModel, field_serializer, ConfigDict
 from typing import Optional, Dict, Any
 from datetime import datetime
 
@@ -64,4 +64,6 @@ class AssessmentOut(BaseModel):
         return v.strftime("%Y-%m-%d %H:%M")
 
     class Config:
-        orm_mode = True
+        model_config = ConfigDict(from_attributes=True)
+        
+

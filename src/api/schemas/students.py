@@ -1,5 +1,5 @@
 # src/api/schemas/students.py
-from pydantic import BaseModel, EmailStr, field_validator, field_serializer
+from pydantic import BaseModel, EmailStr, field_validator, field_serializer, ConfigDict
 from datetime import date, datetime
 from typing import Optional
 import re
@@ -87,10 +87,11 @@ class StudentOut(BaseModel):
     created_at: datetime
 
     class Config:
-        orm_mode = True
+        model_config = ConfigDict(from_attributes=True)
+
 
     @field_serializer("created_at")
     def _fmt_created_at(self, v: Optional[datetime]):
         return v.strftime("%Y-%m-%d %H:%M") if v else None
     class Config:
-        orm_mode = True
+        model_config = ConfigDict(from_attributes=True)

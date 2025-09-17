@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import List, Literal, Dict, Any, Annotated
-from pydantic import BaseModel, Field, conint, confloat, field_validator
+from pydantic import BaseModel, Field, conint, confloat, field_validator, ConfigDict
 
 
 # -----------------------------

@@ -1,11 +1,13 @@
 # src/ai/llm_generator.py
+from __future__ import annotations
 import json
-from typing import Dict, Any
+from typing import Dict, Any, Tuple
+import time, logging, hashlib, json
 from langchain_groq import ChatGroq
 from dotenv import load_dotenv
 
 load_dotenv()
-
+log = logging.getLogger("fitnessgen")
 
 class LLMGenerator:
     """
@@ -15,9 +17,14 @@ class LLMGenerator:
       - chama Groq (ChatGroq) e retorna dict {plan_meta, items}
     """
 
-    def __init__(self, model_id: str = "openai/gpt-oss-120b"):
+    def __init__(self, model_id: str = "openai/gpt-oss-120b", temperature: float = 0.2):
         self.model_id = model_id
-        self.client = ChatGroq(model=self.model_id)
+        self.temperature = temperature
+        self.client = ChatGroq(model=self.model_id, temperature=self.temperature)
+
+    def _hash(self, s: str) -> str:
+        # não logamos prompt bruto: geramos um hash curto (não sensível)
+        return hashlib.sha256(s.encode("utf-8")).hexdigest()[:12]
 
     def _build_prompt(self, bundle: Dict[str, Any]) -> str:
         """
@@ -74,20 +81,16 @@ class LLMGenerator:
             ],
             "saida": "APENAS JSON válido."
         }
-
+        
         # prompt final em texto único (compatível com .invoke(str))
         prompt = (
             f"[SYSTEM]\n{system}\n"
             f"[USER]\n{json.dumps(user_payload, ensure_ascii=False)}"
         )
-        return prompt
+        return prompt   
 
-    def generate_plan(self, bundle: Dict[str, Any]) -> Dict[str, Any]:
-        prompt = self._build_prompt(bundle)
-        response = self.client.invoke(prompt)
-        content = response.content or ""
-
-        # Tenta extrair JSON com robustez (pega trecho entre a 1ª { e a última })
+    def _parse_json_safe(self, content: str) -> Dict[str, Any]:
+        # Extrai JSON do texto (entre a 1ª { e a última })
         try:
             start = content.find("{")
             end = content.rfind("}")
@@ -95,8 +98,7 @@ class LLMGenerator:
                 raise ValueError("Resposta não contém JSON válido.")
             raw_json = content[start:end+1]
             data = json.loads(raw_json)
-        except Exception as e:
-            # Fallback seguro para não quebrar o front (retorna estrutura mínima)
+        except Exception:
             data = {
                 "plan_meta": {
                     "split": "ABC",
@@ -109,8 +111,8 @@ class LLMGenerator:
                 "items": []
             }
 
-        # Sanidade mínima: garantir chaves
-        if "plan_meta" not in data:
+        # sanidade mínima
+        if "plan_meta" not in data or not isinstance(data["plan_meta"], dict):
             data["plan_meta"] = {
                 "split": "ABC",
                 "goal": "ajustar conforme objetivo do aluno",
@@ -121,6 +123,32 @@ class LLMGenerator:
             }
         if "items" not in data or not isinstance(data["items"], list):
             data["items"] = []
-
         return data
+
+    def generate_plan(self, bundle: Dict[str, Any], correlation_id: str | None = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        prompt = self._build_prompt(bundle)
+        start = time.perf_counter()
+        err = None
+        content = ""
+        try:
+            resp = self.client.invoke(prompt)
+            content = resp.content or ""
+        except Exception as e:
+            err = repr(e)
+        dur_ms = (time.perf_counter() - start) * 1000
+
+        meta = {
+            "provider": "groq",
+            "model": self.model,
+            "prompt_hash": self._hash(prompt),
+            "prompt_len": len(prompt),
+            "resp_len": len(content),
+            "duration_ms": round(dur_ms, 2),
+            "error": err,
+            "correlation_id": correlation_id,
+        }
+
+        log.info({"event": "llm_call", **meta})
+        plan = self._parse_json_safe(content)
+        return plan, meta
 # ------------------------------------------

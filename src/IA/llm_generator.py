@@ -139,7 +139,7 @@ class LLMGenerator:
 
         meta = {
             "provider": "groq",
-            "model": self.model,
+            "model": self.model_id,
             "prompt_hash": self._hash(prompt),
             "prompt_len": len(prompt),
             "resp_len": len(content),

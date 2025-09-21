@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import List, Dict, Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, requests
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
@@ -19,7 +19,7 @@ router = APIRouter(prefix="/plans", tags=["plans"])
 # CREATE
 # -----------------------------------------------------------------------------
 @router.post("/", response_model=PlanOut, status_code=status.HTTP_201_CREATED)
-def create_plan(payload: PlanCreate, db: Session = Depends(get_db), request: Request = None):
+def create_plan(payload: PlanCreate, db: Session = Depends(get_db), request: requests = None):
     """
     Recebe o JSON final editado (plan_meta + items) e salva no banco
     amarrando student_id, assessment_id e measurement_id.

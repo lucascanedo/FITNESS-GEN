@@ -1,3 +1,4 @@
+# src/api/routes/plans.py
 from __future__ import annotations
 import json
 from typing import List, Dict, Any
@@ -9,19 +10,20 @@ from sqlalchemy.exc import IntegrityError
 
 from src.db.database import get_db
 from src.api.schemas.plans import (
-    PlanBody, PlanCreate, PlanOut, PlanItem, PlanMeta
+    PlanBody, PlanCreate, PlanOut, PlanItem, PlanMeta, PlanUpdate
 )
 
 router = APIRouter(prefix="/plans", tags=["plans"])
 
 # -----------------------------------------------------------------------------
-# CREATE: salva plano EDITADO no banco
+# CREATE
 # -----------------------------------------------------------------------------
 @router.post("/", response_model=PlanOut, status_code=status.HTTP_201_CREATED)
-def create_plan(payload: PlanCreate, db: Session = Depends(get_db)):
+def create_plan(payload: PlanCreate, db: Session = Depends(get_db), request: Request = None):
     """
     Recebe o JSON final editado (plan_meta + items) e salva no banco
     amarrando student_id, assessment_id e measurement_id.
+    Depois vincula ao llm_calls (se houver correlation_id).
     """
     # valida FKs e pertença ao mesmo aluno
     chk = db.execute(text("""
@@ -58,12 +60,24 @@ def create_plan(payload: PlanCreate, db: Session = Depends(get_db)):
             "mid": payload.measurement_id,
             "pjson": json.dumps(plan_blob, ensure_ascii=False)
         }).mappings().one()
+
+        plan_id = row["id"]
+
+        # 🔗 tenta vincular no llm_calls
+        cid = getattr(request.state, "correlation_id", None)
+        if cid:
+            db.execute(text("""
+                UPDATE llm_calls
+                SET plan_id = :pid
+                WHERE correlation_id = :cid
+            """), {"pid": plan_id, "cid": cid})
+
         db.commit()
         return dict(row)
+
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=400, detail="Erro ao salvar plano.")
-
 
 # -----------------------------------------------------------------------------
 # READs
@@ -91,10 +105,10 @@ def list_plans_by_student(student_id: int, db: Session = Depends(get_db)):
 
 
 # -----------------------------------------------------------------------------
-# UPDATE: troca (parcial) de plan_json (meta e/ou items)
+# UPDATE
 # -----------------------------------------------------------------------------
 @router.put("/{plan_id}", response_model=PlanOut)
-def update_plan(plan_id: int, payload: Dict[str, Any], db: Session = Depends(get_db)):
+def update_plan(plan_id: int, payload: PlanUpdate, db: Session = Depends(get_db)):
     row = db.execute(text("SELECT plan_json FROM plans WHERE id = :id;"),
                      {"id": plan_id}).mappings().one_or_none()
     if row is None:
@@ -104,14 +118,12 @@ def update_plan(plan_id: int, payload: Dict[str, Any], db: Session = Depends(get
     if isinstance(current, str):
         current = json.loads(current)
 
-    # mescla meta (se veio) e substitui items (se veio)
-    if "plan_meta" in payload and payload["plan_meta"] is not None:
-        meta = PlanMeta.model_validate(payload["plan_meta"])
-        current["plan_meta"] = {**current.get("plan_meta", {}), **meta.model_dump()}
+    if payload.plan_meta is not None:
+        meta = payload.plan_meta.model_dump()
+        current["plan_meta"] = {**current.get("plan_meta", {}), **meta}
 
-    if "items" in payload and payload["items"] is not None:
-        items = [PlanItem.model_validate(it).model_dump() for it in payload["items"]]
-        current["items"] = items
+    if payload.items is not None:
+        current["items"] = [it.model_dump() for it in payload.items]
 
     try:
         row2 = db.execute(text("""

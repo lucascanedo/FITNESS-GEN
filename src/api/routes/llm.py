@@ -1,12 +1,13 @@
+# src/api/routes/llm.py
 from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from src.db.database import get_db
-from src.IA.llm_helpers import get_llm_bundle         # valida 3 IDs e monta bundle
-from src.IA.llm_generator import LLMGenerator       # monta prompt, chama Groq e retorna JSON
-from src.api.schemas.plans import PlanBody           # valida o JSON antes de devolver
+from src.IA.llm_helpers import get_llm_bundle
+from src.IA.llm_generator import LLMGenerator
+from src.api.schemas.plans import PlanBody
 
 router = APIRouter(prefix="/llm", tags=["llm"])
 
@@ -37,22 +38,26 @@ def generate_plan_for_edit(
 
     llm = LLMGenerator()
     plan_dict, meta = llm.generate_plan(
-            bundle,
-            correlation_id=getattr(request.state, "correlation_id", None)
-        )
+        bundle,
+        correlation_id=getattr(request.state, "correlation_id", None)
+    )
+
+    # Adiciona raw da resposta ao meta
+    meta["resp_raw"] = meta.get("resp_raw", "")[:5000]  # opcional truncar a 5000 chars
 
     # 3) valida estrutura (não salva plano; só responde ao front)
     try:
         plan_body = PlanBody.model_validate(plan_dict)
     except Exception as e:
-        # mesmo se der erro, vamos logar a chamada com 'error'
+        # loga erro
         try:
             db.execute(text("""
                 INSERT INTO llm_calls (
-                  correlation_id, route, provider, model, prompt_hash, prompt_len, resp_len, duration_ms, error,
+                  correlation_id, route, provider, model, prompt_hash, prompt_len,
+                  resp_len, duration_ms, error, resp_raw,
                   student_id, assessment_id, measurement_id
                 )
-                VALUES (:cid, :route, :prov, :model, :ph, :pl, :rl, :dur, :err, :sid, :aid, :mid)
+                VALUES (:cid, :route, :prov, :model, :ph, :pl, :rl, :dur, :err, :raw, :sid, :aid, :mid)
             """), {
                 "cid": meta.get("correlation_id"),
                 "route": "/llm/generate-plan",
@@ -63,6 +68,7 @@ def generate_plan_for_edit(
                 "rl": meta.get("resp_len"),
                 "dur": meta.get("duration_ms"),
                 "err": meta.get("error") or str(e),
+                "raw": meta.get("resp_raw"),
                 "sid": student_id,
                 "aid": assessment_id,
                 "mid": measurement_id
@@ -76,10 +82,11 @@ def generate_plan_for_edit(
     try:
         db.execute(text("""
             INSERT INTO llm_calls (
-              correlation_id, route, provider, model, prompt_hash, prompt_len, resp_len, duration_ms, error,
+              correlation_id, route, provider, model, prompt_hash, prompt_len,
+              resp_len, duration_ms, error, resp_raw,
               student_id, assessment_id, measurement_id
             )
-            VALUES (:cid, :route, :prov, :model, :ph, :pl, :rl, :dur, :err, :sid, :aid, :mid)
+            VALUES (:cid, :route, :prov, :model, :ph, :pl, :rl, :dur, :err, :raw, :sid, :aid, :mid)
         """), {
             "cid": meta.get("correlation_id"),
             "route": "/llm/generate-plan",
@@ -90,12 +97,13 @@ def generate_plan_for_edit(
             "rl": meta.get("resp_len"),
             "dur": meta.get("duration_ms"),
             "err": meta.get("error"),
+            "raw": meta.get("resp_raw"),
             "sid": student_id,
             "aid": assessment_id,
             "mid": measurement_id
         })
         db.commit()
     except Exception:
-        db.rollback()  # não quebra a resposta
+        db.rollback()
 
     return plan_body

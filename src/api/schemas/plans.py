@@ -1,33 +1,23 @@
 from __future__ import annotations
-from typing import List, Literal, Dict, Any, Annotated
-from pydantic import BaseModel, Field, conint, confloat, field_validator, ConfigDict
+from typing import List, Literal, Dict, Any, Annotated, Optional
+from pydantic import BaseModel, Field, field_validator
 
 
 # -----------------------------
 # Núcleo do plano (editável)
 # -----------------------------
 class PlanMeta(BaseModel):
-    """
-    Metadados do plano retornado pelo LLM e editado no front.
-    """
     split: str = Field(..., description="Ex.: ABC, Full-body, UL, PPL…")
     goal: str = Field(..., description="Objetivo do plano (ex.: hipertrofia + postura)")
-    periodization: Dict[str, Any] = Field(
-        ..., description="Informações sobre ciclo, meso, macro, etc."
-    )
-    constraints: Dict[str, Any] = Field(
-        ..., description="Restrições/observações de segurança."
-    )
+    periodization: Dict[str, Any] = Field(..., description="Ciclo, meso, macro, etc.")
+    constraints: Dict[str, Any] = Field(..., description="Restrições de segurança.")
     version: int = Field(default=1)
     status: Literal["draft", "active", "archived"] = Field(default="draft")
 
 
 class PlanItem(BaseModel):
-    """
-    Linha de prescrição de treino (um exercício em um dia/semana).
-    """
     week: Annotated[int, Field(ge=1, description="Semana do ciclo (>=1).")]
-    day: Annotated[str, Field(description="Identificador do dia (ex.: 'A', 'B', 'seg', 'ter').")]
+    day: Annotated[str, Field(description="Ex.: 'A', 'B', 'seg', 'ter'.")]
     exercise_name: Annotated[str, Field(description="Nome do exercício em PT-BR.")]
     block: Annotated[str, Field(description="Ex.: Força, Potência, Acessório")]
     sets: Annotated[int, Field(ge=1, description="Número de séries (>=1).")]
@@ -35,17 +25,18 @@ class PlanItem(BaseModel):
     rest_s: Annotated[int, Field(ge=0, description="Descanso em segundos.")]
     tempo: Annotated[str, Field(description="Ex.: '3-1-1' ou '3-1-1-0'.")]
 
-    exercise_code: Annotated[str, Field(description="Código interno opcional")]
-    rpe: Annotated[float, Field(ge=0, le=10, description="Esforço percebido (0–10)")]
-    load_pct_1rm: Annotated[float, Field(ge=0, le=100, description="% de 1RM estimada")]
+    # Opcionais
+    exercise_code: Optional[str] = None
+    rpe: Optional[float] = Field(None, ge=0, le=10, description="Esforço percebido (0–10)")
+    load_pct_1rm: Optional[float] = Field(None, ge=0, le=100, description="% de 1RM")
 
-    equipment: str = Field(..., description="Equipamento")
-    focus: str = Field(..., description="Foco muscular principal")
-    cues: str = Field(..., description="Dicas de execução")
-    regression: str = Field(..., description="Versão mais fácil")
-    progression: str = Field(..., description="Versão mais difícil")
-    contraindications: List[str] = Field(..., description="Lista de contraindicações")
-    notes: str = Field(..., description="Observações extras")
+    equipment: Optional[str] = None
+    focus: Optional[str] = None
+    cues: Optional[str] = None
+    regression: Optional[str] = None
+    progression: Optional[str] = None
+    contraindications: Optional[List[str]] = []
+    notes: Optional[str] = None
 
     @field_validator("reps")
     @classmethod
@@ -61,9 +52,6 @@ class PlanItem(BaseModel):
 
 
 class PlanBody(BaseModel):
-    """
-    Corpo do plano que o LLM retorna e o front edita antes de salvar.
-    """
     plan_meta: PlanMeta
     items: List[PlanItem]
 
@@ -72,24 +60,22 @@ class PlanBody(BaseModel):
 # Contratos de entrada/saída
 # -----------------------------
 class PlanCreate(BaseModel):
-    """
-    Payload para salvar um plano no banco.
-    """
     student_id: int
+    assessment_id: int
+    measurement_id: int
     plan_meta: PlanMeta
     items: List[PlanItem]
 
 
 class PlanUpdate(BaseModel):
-    plan_meta: PlanMeta
-    items: List[PlanItem]
+    plan_meta: Optional[PlanMeta] = None
+    items: Optional[List[PlanItem]] = None
 
 
 class PlanOut(BaseModel):
-    """
-    Saída ao buscar um plano salvo no banco.
-    """
     id: int
     student_id: int
-    plan_json: PlanBody
+    assessment_id: int
+    measurement_id: int
+    plan_json: Dict[str, Any]   # saída bruta; pode converter manualmente em PlanBody
     created_at: str

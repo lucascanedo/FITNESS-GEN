@@ -5,9 +5,9 @@ sqlalchemy
 pandas
 numpy
 scikit-learn
-torch,
-streamlit,
-langchain,
-openai,
-mlflow,
+torch
+streamlit
+langchain
+openai
+mlflow
 python-dotenv

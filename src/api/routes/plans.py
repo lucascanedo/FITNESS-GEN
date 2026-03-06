@@ -1,151 +1,103 @@
 # src/api/routes/plans.py
-from __future__ import annotations
-import json
-from typing import List, Dict, Any
-
-from fastapi import APIRouter, Depends, HTTPException, status, requests
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError
 
 from src.db.database import get_db
-from src.api.schemas.plans import (
-    PlanBody, PlanCreate, PlanOut, PlanItem, PlanMeta, PlanUpdate
+from src.api.schemas.plans import PlanCreate, PlanOut, PlanUpdate
+from src.services.plan_service import (
+    create_plan,
+    create_plan_from_llm,
+    update_plan,
+    get_plan,
+    get_student_plans,
+    delete_plan,
 )
+from src.services.plan_analysis_service import analyze_plan_differences, get_professor_edit_patterns
 
 router = APIRouter(prefix="/plans", tags=["plans"])
 
-# -----------------------------------------------------------------------------
-# CREATE
-# -----------------------------------------------------------------------------
-@router.post("/", response_model=PlanOut, status_code=status.HTTP_201_CREATED)
-def create_plan(payload: PlanCreate, db: Session = Depends(get_db), request: requests = None):
+
+def _resolve_llm_call_id(db: Session, correlation_id: str | None, llm_call_id: int | None) -> int | None:
+    if llm_call_id is not None:
+        return llm_call_id
+    if correlation_id:
+        row = db.execute(
+            text("SELECT id FROM llm_calls WHERE correlation_id = :cid ORDER BY id DESC LIMIT 1;"),
+            {"cid": correlation_id}
+        ).mappings().one_or_none()
+        return row["id"] if row else None
+    return None
+
+
+@router.post("/", response_model=PlanOut, status_code=201)
+def create_plan_route(payload: PlanCreate, db: Session = Depends(get_db), request: Request = None):
     """
-    Recebe o JSON final editado (plan_meta + items) e salva no banco
-    amarrando student_id, assessment_id e measurement_id.
-    Depois vincula ao llm_calls (se houver correlation_id).
+    Cria plano a partir do JSON editado pelo treinador.
+    Aceita generated_plan_json/llm_call_id/correlation_id para vincular ao LLM.
     """
-    # valida FKs e pertença ao mesmo aluno
-    chk = db.execute(text("""
-        SELECT
-          (SELECT student_id FROM assessments  WHERE id = :aid) AS a_sid,
-          (SELECT student_id FROM measurements WHERE id = :mid) AS m_sid,
-          (SELECT 1          FROM students     WHERE id = :sid) AS s_ok
-    """), {
-        "sid": payload.student_id,
-        "aid": payload.assessment_id,
-        "mid": payload.measurement_id
-    }).mappings().one()
-
-    if chk["s_ok"] is None:
-        raise HTTPException(status_code=400, detail="student_id inválido.")
-    if chk["a_sid"] is None or chk["m_sid"] is None:
-        raise HTTPException(status_code=400, detail="assessment_id ou measurement_id inválidos.")
-    if not (chk["a_sid"] == payload.student_id and chk["m_sid"] == payload.student_id):
-        raise HTTPException(status_code=400, detail="IDs não pertencem ao mesmo aluno.")
-
-    plan_blob = {
-        "plan_meta": payload.plan_meta.model_dump(),
-        "items": [it.model_dump() for it in payload.items],
-    }
-
-    try:
-        row = db.execute(text("""
-            INSERT INTO plans (student_id, assessment_id, measurement_id, plan_json)
-            VALUES (:sid, :aid, :mid, :pjson)
-            RETURNING id, student_id, assessment_id, measurement_id, plan_json, created_at;
-        """), {
-            "sid": payload.student_id,
-            "aid": payload.assessment_id,
-            "mid": payload.measurement_id,
-            "pjson": json.dumps(plan_blob, ensure_ascii=False)
-        }).mappings().one()
-
-        plan_id = row["id"]
-
-        # 🔗 tenta vincular no llm_calls
-        cid = getattr(request.state, "correlation_id", None)
-        if cid:
-            db.execute(text("""
-                UPDATE llm_calls
-                SET plan_id = :pid
-                WHERE correlation_id = :cid
-            """), {"pid": plan_id, "cid": cid})
-
+    llm_id = _resolve_llm_call_id(
+        db,
+        payload.correlation_id or getattr(request.state, "correlation_id", None),
+        payload.llm_call_id,
+    )
+    plan = create_plan(
+        db=db,
+        student_id=payload.student_id,
+        assessment_id=payload.assessment_id,
+        measurement_id=payload.measurement_id,
+        plan_meta=payload.plan_meta.model_dump(),
+        items=[it.model_dump() for it in payload.items],
+        generated_plan_json=payload.generated_plan_json,
+        llm_call_id=llm_id,
+    )
+    if llm_id:
+        db.execute(text("UPDATE llm_calls SET plan_id = :pid WHERE id = :lid;"), {"pid": plan["id"], "lid": llm_id})
         db.commit()
-        return dict(row)
+    return plan
 
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(status_code=400, detail="Erro ao salvar plano.")
 
-# -----------------------------------------------------------------------------
-# READs
-# -----------------------------------------------------------------------------
+@router.get("/edit-patterns")
+def get_edit_patterns_route(student_id: int | None = None, db: Session = Depends(get_db)):
+    return get_professor_edit_patterns(db, student_id)
+
+
 @router.get("/{plan_id}", response_model=PlanOut)
-def get_plan(plan_id: int, db: Session = Depends(get_db)):
-    row = db.execute(text("""
-        SELECT id, student_id, assessment_id, measurement_id, plan_json, created_at
-        FROM plans
-        WHERE id = :pid;
-    """), {"pid": plan_id}).mappings().one_or_none()
-    if row is None:
+def get_plan_route(plan_id: int, db: Session = Depends(get_db)):
+    plan = get_plan(db, plan_id)
+    if plan is None:
         raise HTTPException(status_code=404, detail="Plan not found")
-    return dict(row)
-
-@router.get("/student/{student_id}", response_model=List[PlanOut])
-def list_plans_by_student(student_id: int, db: Session = Depends(get_db)):
-    rows = db.execute(text("""
-        SELECT id, student_id, assessment_id, measurement_id, plan_json, created_at
-        FROM plans
-        WHERE student_id = :sid
-        ORDER BY id DESC;
-    """), {"sid": student_id}).mappings().all()
-    return [dict(r) for r in rows]
+    return plan
 
 
-# -----------------------------------------------------------------------------
-# UPDATE
-# -----------------------------------------------------------------------------
+@router.get("/student/{student_id}", response_model=list[PlanOut])
+def list_plans_route(student_id: int, db: Session = Depends(get_db)):
+    return get_student_plans(db, student_id)
+
+
 @router.put("/{plan_id}", response_model=PlanOut)
-def update_plan(plan_id: int, payload: PlanUpdate, db: Session = Depends(get_db)):
-    row = db.execute(text("SELECT plan_json FROM plans WHERE id = :id;"),
-                     {"id": plan_id}).mappings().one_or_none()
-    if row is None:
-        raise HTTPException(status_code=404, detail="Plan not found")
-
-    current = row["plan_json"]
-    if isinstance(current, str):
-        current = json.loads(current)
-
-    if payload.plan_meta is not None:
-        meta = payload.plan_meta.model_dump()
-        current["plan_meta"] = {**current.get("plan_meta", {}), **meta}
-
-    if payload.items is not None:
-        current["items"] = [it.model_dump() for it in payload.items]
-
-    try:
-        row2 = db.execute(text("""
-            UPDATE plans
-            SET plan_json = :pjson
-            WHERE id = :id
-            RETURNING id, student_id, assessment_id, measurement_id, plan_json, created_at;
-        """), {"pjson": json.dumps(current, ensure_ascii=False), "id": plan_id}).mappings().one()
-        db.commit()
-        return dict(row2)
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(status_code=400, detail="Erro ao atualizar plano.")
+def update_plan_route(plan_id: int, payload: PlanUpdate, db: Session = Depends(get_db)):
+    return update_plan(
+        db,
+        plan_id,
+        payload.plan_meta.model_dump() if payload.plan_meta else None,
+        [it.model_dump() for it in payload.items] if payload.items else None,
+    )
 
 
-# -----------------------------------------------------------------------------
-# DELETE
-# -----------------------------------------------------------------------------
-@router.delete("/{plan_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_plan(plan_id: int, db: Session = Depends(get_db)):
-    res = db.execute(text("DELETE FROM plans WHERE id = :id;"), {"id": plan_id})
-    db.commit()
-    if res.rowcount == 0:
+@router.delete("/{plan_id}", status_code=204)
+def delete_plan_route(plan_id: int, db: Session = Depends(get_db)):
+    ok = delete_plan(db, plan_id)
+    if not ok:
         raise HTTPException(status_code=404, detail="Plan not found")
     return
+
+
+@router.get("/{plan_id}/analysis")
+def get_plan_analysis(plan_id: int, db: Session = Depends(get_db)):
+    result = analyze_plan_differences(db, plan_id)
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
+
+

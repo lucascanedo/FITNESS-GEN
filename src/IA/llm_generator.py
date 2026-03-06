@@ -45,8 +45,11 @@ class LLMGenerator:
             "6) 'plan_meta' deve conter: split, goal, periodization, constraints, version=1, status='draft'.\n"
         )
 
+        # Remove _learning_context from contexto para não duplicar; injeta separado no prompt
+        ctx = {k: v for k, v in bundle.items() if k != "_learning_context"}
+        learning = bundle.get("_learning_context", "")
         user_payload = {
-            "contexto": bundle,
+            "contexto": ctx,
             "formato_esperado": {
                 "plan_meta": {
                     "split": "ABC",
@@ -78,10 +81,13 @@ class LLMGenerator:
                 "Se não tiver certeza, omita opcionais em vez de inventar.",
                 "Inclua mobilidade/ativação se houver desvios posturais.",
                 "Distribua sessões respeitando freq_per_week e session_time_min."
-            ],
+            ]
+            + (["Priorize os padrões de edição do treinador listados acima."] if learning else []),
             "saida": "APENAS JSON válido."
         }
-        
+        if learning:
+            user_payload["historico_edicoes_treinador"] = learning
+
         # prompt final em texto único (compatível com .invoke(str))
         prompt = (
             f"[SYSTEM]\n{system}\n"

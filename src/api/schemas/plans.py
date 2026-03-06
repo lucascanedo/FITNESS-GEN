@@ -19,7 +19,7 @@ class PlanItem(BaseModel):
     week: Annotated[int, Field(ge=1, description="Semana do ciclo (>=1).")]
     day: Annotated[str, Field(description="Ex.: 'A', 'B', 'seg', 'ter'.")]
     exercise_name: Annotated[str, Field(description="Nome do exercício em PT-BR.")]
-    block: Annotated[str, Field(description="Ex.: Força, Potência, Acessório")]
+    block: Annotated[str, Field(default="Principal", description="Ex.: Força, Potência, Acessório")]
     sets: Annotated[int, Field(ge=1, description="Número de séries (>=1).")]
     reps: Annotated[str, Field(description="Ex.: '6-8' ou '10'")]
     rest_s: Annotated[int, Field(ge=0, description="Descanso em segundos.")]
@@ -65,6 +65,9 @@ class PlanCreate(BaseModel):
     measurement_id: int
     plan_meta: PlanMeta
     items: List[PlanItem]
+    generated_plan_json: Optional[Dict[str, Any]] = None  # rascunho original do LLM
+    llm_call_id: Optional[int] = None
+    correlation_id: Optional[str] = None  # para vincular ao llm_call
 
 
 class PlanUpdate(BaseModel):
@@ -72,10 +75,20 @@ class PlanUpdate(BaseModel):
     items: Optional[List[PlanItem]] = None
 
 
+class PlanGenerationResponse(BaseModel):
+    """Resposta da geração LLM: plano + id para vincular ao salvar."""
+    plan: "PlanBody"
+    llm_call_id: Optional[int] = None
+
+
 class PlanOut(BaseModel):
     id: int
     student_id: int
     assessment_id: int
     measurement_id: int
-    plan_json: Dict[str, Any]   # saída bruta; pode converter manualmente em PlanBody
+    generated_plan_json: Optional[Dict[str, Any]] = None
+    plan_json: Dict[str, Any]
+    llm_call_id: Optional[int] = None
+    edit_count: int = 0
     created_at: str
+    updated_at: Optional[str] = None

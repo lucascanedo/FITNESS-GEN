@@ -116,6 +116,12 @@ CREATE TABLE IF NOT EXISTS assessments (
     level VARCHAR(20),
     freq_per_week INT,
     session_time_min INT,
+    case_notes TEXT,
+    equipment JSONB,
+    red_flags JSONB,
+    readiness JSONB,
+    periodization JSONB,
+    status VARCHAR(20),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -123,20 +129,58 @@ CREATE INDEX IF NOT EXISTS idx_assessments_student
 ON assessments (student_id);
 
 -- ========================
--- TABELA: PLANS (planos gerados pelo LLM)
+-- TABELA: LLM_CALLS (auditoria de chamadas LLM)
 -- ========================
+CREATE TABLE IF NOT EXISTS llm_calls (
+    id BIGSERIAL PRIMARY KEY,
+    correlation_id VARCHAR(64),
+    route VARCHAR(128),
+    provider VARCHAR(32),
+    model VARCHAR(128),
+    prompt_hash VARCHAR(32),
+    prompt_len INT,
+    resp_len INT,
+    duration_ms NUMERIC(10,2),
+    error TEXT,
+    resp_raw TEXT,
+    student_id INT REFERENCES students(id) ON DELETE SET NULL,
+    assessment_id INT REFERENCES assessments(id) ON DELETE SET NULL,
+    measurement_id INT REFERENCES measurements(id) ON DELETE SET NULL,
+    plan_id INT,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_llm_calls_student ON llm_calls(student_id);
+CREATE INDEX IF NOT EXISTS idx_llm_calls_correlation ON llm_calls(correlation_id);
 
+-- ========================
+-- TABELA: PLANS (planos gerados pelo LLM + editados pelo professor)
+-- ========================
 CREATE TABLE IF NOT EXISTS plans (
     id SERIAL PRIMARY KEY,
     student_id INT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
     assessment_id INT NOT NULL REFERENCES assessments(id) ON DELETE CASCADE,
     measurement_id INT REFERENCES measurements(id) ON DELETE SET NULL,
+    generated_plan_json JSONB,
     plan_json JSONB NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    llm_call_id BIGINT REFERENCES llm_calls(id) ON DELETE SET NULL,
+    edit_count INT DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_plans_student
-ON plans (student_id);
+CREATE INDEX IF NOT EXISTS idx_plans_student ON plans (student_id);
+CREATE INDEX IF NOT EXISTS idx_plans_assessment ON plans (assessment_id);
 
-CREATE INDEX IF NOT EXISTS idx_plans_assessment
-ON plans (assessment_id);
+-- ========================
+-- TABELA: PLAN_VERSIONS (histórico de versões para aprendizado)
+-- ========================
+CREATE TABLE IF NOT EXISTS plan_versions (
+    id BIGSERIAL PRIMARY KEY,
+    plan_id INT NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+    version_number INT NOT NULL,
+    source VARCHAR(20) NOT NULL CHECK (source IN ('llm', 'teacher')),
+    plan_json JSONB NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(plan_id, version_number)
+);
+CREATE INDEX IF NOT EXISTS idx_plan_versions_plan ON plan_versions(plan_id);

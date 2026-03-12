@@ -1,4 +1,5 @@
 from __future__ import annotations
+from datetime import datetime
 from typing import List, Literal, Dict, Any, Annotated, Optional
 from pydantic import BaseModel, Field, field_validator
 
@@ -90,5 +91,5 @@ class PlanOut(BaseModel):
     plan_json: Dict[str, Any]
     llm_call_id: Optional[int] = None
     edit_count: int = 0
-    created_at: str
-    updated_at: Optional[str] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None

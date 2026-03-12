@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "fitness-gen": {
+      "command": "python",
+      "args": [
+        "-m",
+        "src.mcp.server"
+      ],
+      "cwd": "C:\\Users\\Lucas\\OneDrive - Globalweb\\Documentos\\PROJETOS\\FITNESS-GEN",
+      "env": {
+        "DATABASE_URL": "postgresql+psycopg2://USER:PASSWORD@localhost:5432/fitnessgen-db",
+        "GROQ_API_KEY": "your-key-if-needed"
+      }
+    }
+  }
+}

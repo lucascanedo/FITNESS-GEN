@@ -2,10 +2,11 @@
 from __future__ import annotations
 from typing import Any
 
-from sqlalchemy.orm import Session
-from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 from fastapi import HTTPException
+
+from src.repositories import student_repository
 
 
 def _normalize_cpf(cpf: str) -> str:
@@ -16,13 +17,8 @@ def create_student(db: Session, data: dict[str, Any]) -> dict[str, Any]:
     data = dict(data)
     if "cpf" in data and data["cpf"]:
         data["cpf"] = _normalize_cpf(str(data["cpf"]))
-    stmt = text("""
-        INSERT INTO students (cpf, name, birth_date, sex, email, phone)
-        VALUES (:cpf, :name, :birth_date, :sex, :email, :phone)
-        RETURNING id, cpf, name, birth_date, age, sex, email, phone, created_at;
-    """)
     try:
-        row = db.execute(stmt, data).mappings().one()
+        row = student_repository.insert_student(db, data)
         db.commit()
         return dict(row)
     except IntegrityError as e:
@@ -45,26 +41,17 @@ def _raise_unique_error(e: IntegrityError) -> None:
 
 
 def get_student_by_id(db: Session, student_id: int) -> dict[str, Any] | None:
-    row = db.execute(text("""
-        SELECT id, cpf, name, birth_date, age, sex, email, phone, created_at
-        FROM students WHERE id = :id;
-    """), {"id": student_id}).mappings().one_or_none()
+    row = student_repository.select_student_by_id(db, student_id)
     return dict(row) if row else None
 
 
 def get_student_by_cpf(db: Session, cpf: str) -> dict[str, Any] | None:
-    row = db.execute(text("""
-        SELECT id, cpf, name, birth_date, age, sex, email, phone, created_at
-        FROM students WHERE cpf = :cpf;
-    """), {"cpf": _normalize_cpf(cpf)}).mappings().one_or_none()
+    row = student_repository.select_student_by_cpf(db, _normalize_cpf(cpf))
     return dict(row) if row else None
 
 
 def list_students(db: Session) -> list[dict[str, Any]]:
-    rows = db.execute(text("""
-        SELECT id, cpf, name, birth_date, age, sex, email, phone, created_at
-        FROM students ORDER BY id DESC;
-    """)).mappings().all()
+    rows = student_repository.select_students(db)
     return [dict(r) for r in rows]
 
 
@@ -77,16 +64,7 @@ def update_student(db: Session, student_id: int, data: dict[str, Any]) -> dict[s
         return student
     data["id"] = student_id
     try:
-        row = db.execute(text("""
-            UPDATE students
-            SET name       = COALESCE(:name, name),
-                birth_date = COALESCE(:birth_date, birth_date),
-                sex        = COALESCE(:sex, sex),
-                email      = COALESCE(:email, email),
-                phone      = COALESCE(:phone, phone)
-            WHERE id = :id
-            RETURNING id, cpf, name, birth_date, age, sex, email, phone, created_at;
-        """), data).mappings().one()
+        row = student_repository.update_student_fields(db, data)
         db.commit()
         return dict(row)
     except IntegrityError as e:
@@ -96,6 +74,6 @@ def update_student(db: Session, student_id: int, data: dict[str, Any]) -> dict[s
 
 
 def delete_student(db: Session, student_id: int) -> bool:
-    res = db.execute(text("DELETE FROM students WHERE id = :id;"), {"id": student_id})
+    rowcount = student_repository.delete_student_by_id(db, student_id)
     db.commit()
-    return res.rowcount > 0
+    return rowcount > 0

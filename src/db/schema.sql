@@ -172,6 +172,17 @@ CREATE INDEX IF NOT EXISTS idx_plans_student ON plans (student_id);
 CREATE INDEX IF NOT EXISTS idx_plans_assessment ON plans (assessment_id);
 
 -- ========================
+-- TABELA: STUDENT_CURRENT_PLANS (plano ativo atual por aluno)
+-- ========================
+CREATE TABLE IF NOT EXISTS student_current_plans (
+    student_id INT PRIMARY KEY REFERENCES students(id) ON DELETE CASCADE,
+    plan_id INT NOT NULL UNIQUE REFERENCES plans(id) ON DELETE CASCADE,
+    assigned_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_student_current_plans_plan ON student_current_plans(plan_id);
+
+-- ========================
 -- TABELA: PLAN_VERSIONS (histórico de versões para aprendizado)
 -- ========================
 CREATE TABLE IF NOT EXISTS plan_versions (
@@ -184,3 +195,19 @@ CREATE TABLE IF NOT EXISTS plan_versions (
     UNIQUE(plan_id, version_number)
 );
 CREATE INDEX IF NOT EXISTS idx_plan_versions_plan ON plan_versions(plan_id);
+
+-- ========================
+-- TABELA: PLAN_LLM_COMPARISONS (base de feedback LLM x professor)
+-- ========================
+CREATE TABLE IF NOT EXISTS plan_llm_comparisons (
+    id BIGSERIAL PRIMARY KEY,
+    plan_id INT NOT NULL UNIQUE REFERENCES plans(id) ON DELETE CASCADE,
+    llm_plan_json JSONB NOT NULL,
+    edited_plan_json JSONB NOT NULL,
+    similarity_score NUMERIC(6,4) NOT NULL DEFAULT 1.0,
+    comparison_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_plan_llm_comparisons_similarity ON plan_llm_comparisons(similarity_score);
+CREATE INDEX IF NOT EXISTS idx_plan_llm_comparisons_updated ON plan_llm_comparisons(updated_at DESC);

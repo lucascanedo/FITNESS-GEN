@@ -1,6 +1,9 @@
 # Python-generated files
 __pycache__/
 *.py[oc]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 build/
 dist/
 wheels/
@@ -8,3 +11,7 @@ wheels/
 
 # Virtual environments
 .venv
+.env
+
+# Frontend artifacts
+frontend/node_modules/

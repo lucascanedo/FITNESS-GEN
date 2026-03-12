@@ -1,42 +1,43 @@
-# src/services/llm_service.py
 """
-Orquestração do LLM: construção de contexto, geração e log.
-A lógica de negócio permanece nos services; o LLM apenas gera texto.
+Orquestracao do LLM: construcao de contexto, geracao e log.
+O fluxo interno usa services diretamente; MCP permanece opcional para agentes externos.
 """
 from __future__ import annotations
+
 from typing import Any
 
-from sqlalchemy.orm import Session
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 
-from src.IA.llm_helpers import get_llm_bundle
 from src.IA.llm_generator import LLMGenerator
-from src.services.plan_analysis_service import build_llm_learning_context
+from src.services.llm_context_service import build_generation_context
+from src.services.plan_analysis_service import build_student_plan_mcp_context
 
 
-def build_generation_context(
+def build_generation_payload(
     db: Session,
     student_id: int,
     assessment_id: int,
     measurement_id: int,
     include_learning: bool = True,
+    include_current_plan: bool = True,
 ) -> dict[str, Any]:
-    """
-    Monta o bundle completo para geração (student, assessment, measurement).
-    Se include_learning=True, adiciona contexto de edições do professor.
-    """
-    bundle = get_llm_bundle(
+    generation_context = build_generation_context(
         db=db,
         student_id=student_id,
         assessment_id=assessment_id,
         measurement_id=measurement_id,
-        enforce_snapshot_match=False,
+        include_learning=include_learning,
     )
-    if include_learning:
-        learning = build_llm_learning_context(db, student_id)
-        if learning:
-            bundle["_learning_context"] = learning
-    return bundle
+    payload: dict[str, Any] = {
+        "student_id": student_id,
+        "assessment_id": assessment_id,
+        "measurement_id": measurement_id,
+        "generation_context": generation_context,
+    }
+    if include_current_plan:
+        payload["current_plan_context"] = build_student_plan_mcp_context(db, student_id)
+    return payload
 
 
 def generate_plan_with_learning_context(
@@ -46,15 +47,28 @@ def generate_plan_with_learning_context(
     measurement_id: int,
     correlation_id: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """
-    Gera um plano via LLM com contexto de aprendizado injetado.
-    Retorna (plan_dict, meta) para o chamador persistir e logar.
-    """
-    bundle = build_generation_context(
-        db, student_id, assessment_id, measurement_id, include_learning=True
+    context_payload = build_generation_payload(
+        db=db,
+        student_id=student_id,
+        assessment_id=assessment_id,
+        measurement_id=measurement_id,
+        include_learning=True,
+        include_current_plan=True,
     )
     llm = LLMGenerator()
-    plan_dict, meta = llm.generate_plan(bundle, correlation_id=correlation_id)
+    plan_dict, meta = llm.generate_plan(context_payload, correlation_id=correlation_id)
+
+    generation_context = context_payload.get("generation_context") or {}
+    learning = generation_context.get("_learning_context") or {}
+    if learning:
+        metrics = learning.get("quality_metrics") or {}
+        meta["learning_context_stats"] = {
+            "plans_used_for_learning": metrics.get("plans_used_for_learning", 0),
+            "similar_plans_used": metrics.get("similar_plans_used", 0),
+            "similar_profile_alignment_score": metrics.get("similar_profile_alignment_score"),
+        }
+
+    meta["context_source"] = "services"
     meta["student_id"] = student_id
     meta["assessment_id"] = assessment_id
     meta["measurement_id"] = measurement_id
@@ -62,9 +76,6 @@ def generate_plan_with_learning_context(
 
 
 def log_llm_call(db: Session, meta: dict[str, Any]) -> int | None:
-    """
-    Insere registro em llm_calls e retorna o id.
-    """
     stmt = text("""
         INSERT INTO llm_calls (
           correlation_id, route, provider, model, prompt_hash, prompt_len,

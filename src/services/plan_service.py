@@ -1,12 +1,15 @@
 # src/services/plan_service.py
 from __future__ import annotations
+
 import json
 from typing import Any
 
-from sqlalchemy.orm import Session
-from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError
 from fastapi import HTTPException
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
+from src.repositories import plan_repository
+from src.services.plan_analysis_service import build_plan_comparison_snapshot
 
 
 def _validate_fks(
@@ -15,23 +18,51 @@ def _validate_fks(
     assessment_id: int,
     measurement_id: int,
 ) -> None:
-    """Valida que assessment e measurement pertencem ao mesmo student."""
-    row = db.execute(text("""
-        SELECT
-          (SELECT student_id FROM assessments  WHERE id = :aid) AS a_sid,
-          (SELECT student_id FROM measurements WHERE id = :mid) AS m_sid,
-          (SELECT 1          FROM students     WHERE id = :sid) AS s_ok
-    """), {"sid": student_id, "aid": assessment_id, "mid": measurement_id}).mappings().one()
+    row = plan_repository.select_plan_fk_state(db, student_id, assessment_id, measurement_id)
     if row["s_ok"] is None:
-        raise HTTPException(status_code=400, detail="student_id inválido.")
+        raise HTTPException(status_code=400, detail="student_id invÃ¡lido.")
     if row["a_sid"] is None or row["m_sid"] is None:
-        raise HTTPException(status_code=400, detail="assessment_id ou measurement_id inválidos.")
+        raise HTTPException(status_code=400, detail="assessment_id ou measurement_id invÃ¡lidos.")
     if row["a_sid"] != student_id or row["m_sid"] != student_id:
-        raise HTTPException(status_code=400, detail="IDs não pertencem ao mesmo aluno.")
+        raise HTTPException(status_code=400, detail="IDs nÃ£o pertencem ao mesmo aluno.")
 
 
 def _plan_blob(plan_meta: dict, items: list) -> dict:
     return {"plan_meta": plan_meta, "items": items}
+
+
+def _sync_plan_comparison(
+    db: Session,
+    plan_id: int,
+    generated_plan: dict[str, Any],
+    edited_plan: dict[str, Any],
+) -> None:
+    snapshot = build_plan_comparison_snapshot(plan_id, generated_plan, edited_plan)
+    plan_repository.upsert_plan_comparison(
+        db=db,
+        plan_id=plan_id,
+        llm_json=json.dumps(snapshot["llm_plan_json"], ensure_ascii=False),
+        edited_json=json.dumps(snapshot["edited_plan_json"], ensure_ascii=False),
+        similarity=snapshot["similarity_score"],
+        comparison_json=json.dumps(snapshot["comparison_json"], ensure_ascii=False),
+    )
+
+
+def _set_current_plan(db: Session, student_id: int, plan_id: int) -> None:
+    plan_repository.set_current_plan(db, student_id, plan_id)
+
+
+def _reassign_current_plan_after_delete(db: Session, student_id: int, deleted_plan_id: int) -> None:
+    current_row = plan_repository.select_current_plan_pointer(db, student_id)
+    if current_row is None or current_row["plan_id"] != deleted_plan_id:
+        return
+
+    replacement = plan_repository.select_replacement_plan(db, student_id, deleted_plan_id)
+    if replacement is None:
+        plan_repository.delete_current_plan_pointer(db, student_id)
+        return
+
+    _set_current_plan(db, student_id, replacement["id"])
 
 
 def create_plan_from_llm(
@@ -43,31 +74,24 @@ def create_plan_from_llm(
     items: list,
     llm_call_id: int | None = None,
 ) -> dict[str, Any]:
-    """
-    Cria um novo plano vindo do LLM.
-    Salva generated_plan_json e plan_json com o mesmo conteúdo inicial.
-    Cria plan_version v0 como source='llm'.
-    """
     _validate_fks(db, student_id, assessment_id, measurement_id)
     blob = _plan_blob(plan_meta, items)
     pjson = json.dumps(blob, ensure_ascii=False)
 
-    stmt = text("""
-        INSERT INTO plans (student_id, assessment_id, measurement_id, generated_plan_json, plan_json, llm_call_id, edit_count, updated_at)
-        VALUES (:sid, :aid, :mid, :gen_json, :pjson, :llm_id, 0, CURRENT_TIMESTAMP)
-        RETURNING id, student_id, assessment_id, measurement_id, generated_plan_json, plan_json,
-                  llm_call_id, edit_count, created_at, updated_at;
-    """)
     try:
-        row = db.execute(stmt, {
-            "sid": student_id, "aid": assessment_id, "mid": measurement_id,
-            "gen_json": pjson, "pjson": pjson, "llm_id": llm_call_id
-        }).mappings().one()
+        row = plan_repository.insert_plan(
+            db=db,
+            student_id=student_id,
+            assessment_id=assessment_id,
+            measurement_id=measurement_id,
+            generated_plan_json=pjson,
+            plan_json=pjson,
+            llm_call_id=llm_call_id,
+        )
         plan_id = row["id"]
-        db.execute(text("""
-            INSERT INTO plan_versions (plan_id, version_number, source, plan_json)
-            VALUES (:pid, 1, 'llm', :pjson);
-        """), {"pid": plan_id, "pjson": pjson})
+        plan_repository.insert_plan_version(db, plan_id, 1, "llm", pjson)
+        _sync_plan_comparison(db, plan_id, blob, blob)
+        _set_current_plan(db, student_id, plan_id)
         db.commit()
         return dict(row)
     except IntegrityError:
@@ -85,32 +109,25 @@ def create_plan(
     generated_plan_json: dict | None = None,
     llm_call_id: int | None = None,
 ) -> dict[str, Any]:
-    """
-    Cria um plano (compatível com fluxo antigo: JSON editado pelo professor).
-    Se generated_plan_json for None, usa o blob atual como generated.
-    Cria plan_version v1 como source='teacher'.
-    """
     _validate_fks(db, student_id, assessment_id, measurement_id)
     blob = _plan_blob(plan_meta, items)
     pjson = json.dumps(blob, ensure_ascii=False)
     gen_json = json.dumps(generated_plan_json, ensure_ascii=False) if generated_plan_json else pjson
 
-    stmt = text("""
-        INSERT INTO plans (student_id, assessment_id, measurement_id, generated_plan_json, plan_json, llm_call_id, edit_count, updated_at)
-        VALUES (:sid, :aid, :mid, :gen_json, :pjson, :llm_id, 0, CURRENT_TIMESTAMP)
-        RETURNING id, student_id, assessment_id, measurement_id, generated_plan_json, plan_json,
-                  llm_call_id, edit_count, created_at, updated_at;
-    """)
     try:
-        row = db.execute(stmt, {
-            "sid": student_id, "aid": assessment_id, "mid": measurement_id,
-            "gen_json": gen_json, "pjson": pjson, "llm_id": llm_call_id
-        }).mappings().one()
+        row = plan_repository.insert_plan(
+            db=db,
+            student_id=student_id,
+            assessment_id=assessment_id,
+            measurement_id=measurement_id,
+            generated_plan_json=gen_json,
+            plan_json=pjson,
+            llm_call_id=llm_call_id,
+        )
         plan_id = row["id"]
-        db.execute(text("""
-            INSERT INTO plan_versions (plan_id, version_number, source, plan_json)
-            VALUES (:pid, 1, 'teacher', :pjson);
-        """), {"pid": plan_id, "pjson": pjson})
+        plan_repository.insert_plan_version(db, plan_id, 1, "teacher", pjson)
+        _sync_plan_comparison(db, plan_id, json.loads(gen_json), blob)
+        _set_current_plan(db, student_id, plan_id)
         db.commit()
         return dict(row)
     except IntegrityError:
@@ -119,17 +136,14 @@ def create_plan(
 
 
 def update_plan(db: Session, plan_id: int, plan_meta: dict | None, items: list | None) -> dict[str, Any]:
-    """
-    Atualiza o plano com edições do professor.
-    Incrementa edit_count e cria nova entrada em plan_versions.
-    """
-    row = db.execute(text("""
-        SELECT plan_json, edit_count FROM plans WHERE id = :id;
-    """), {"id": plan_id}).mappings().one_or_none()
+    row = plan_repository.select_plan_state(db, plan_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Plan not found")
 
+    generated_plan = row["generated_plan_json"] or row["plan_json"]
     current = row["plan_json"]
+    if isinstance(generated_plan, str):
+        generated_plan = json.loads(generated_plan)
     if isinstance(current, str):
         current = json.loads(current)
     edit_count = row["edit_count"] or 0
@@ -140,20 +154,13 @@ def update_plan(db: Session, plan_id: int, plan_meta: dict | None, items: list |
         current["items"] = items
 
     pjson = json.dumps(current, ensure_ascii=False)
-    version_num = edit_count + 2  # v1 foi criação; próxima é v2, v3...
+    version_num = edit_count + 2
 
-    stmt = text("""
-        UPDATE plans SET plan_json = :pjson, edit_count = :ec, updated_at = CURRENT_TIMESTAMP
-        WHERE id = :id
-        RETURNING id, student_id, assessment_id, measurement_id, generated_plan_json, plan_json,
-                  llm_call_id, edit_count, created_at, updated_at;
-    """)
     try:
-        db.execute(text("""
-            INSERT INTO plan_versions (plan_id, version_number, source, plan_json)
-            VALUES (:pid, :vnum, 'teacher', :pjson);
-        """), {"pid": plan_id, "vnum": version_num, "pjson": pjson})
-        row2 = db.execute(stmt, {"pjson": pjson, "ec": edit_count + 1, "id": plan_id}).mappings().one()
+        plan_repository.insert_plan_version(db, plan_id, version_num, "teacher", pjson)
+        row2 = plan_repository.update_plan_payload(db, plan_id, pjson, edit_count + 1)
+        _sync_plan_comparison(db, plan_id, generated_plan, current)
+        _set_current_plan(db, row2["student_id"], plan_id)
         db.commit()
         return dict(row2)
     except IntegrityError:
@@ -162,40 +169,36 @@ def update_plan(db: Session, plan_id: int, plan_meta: dict | None, items: list |
 
 
 def create_plan_version(db: Session, plan_id: int, source: str, plan_json: dict) -> dict[str, Any]:
-    """Registra uma nova versão manualmente (útil para sincronização)."""
     if source not in ("llm", "teacher"):
         raise HTTPException(status_code=400, detail="source deve ser 'llm' ou 'teacher'")
     pjson = json.dumps(plan_json, ensure_ascii=False) if isinstance(plan_json, dict) else plan_json
-    row = db.execute(text("SELECT COALESCE(MAX(version_number), 0) + 1 AS n FROM plan_versions WHERE plan_id = :pid;"),
-                     {"pid": plan_id}).mappings().one()
+    row = plan_repository.select_next_plan_version_number(db, plan_id)
     vnum = row["n"]
-    db.execute(text("""
-        INSERT INTO plan_versions (plan_id, version_number, source, plan_json)
-        VALUES (:pid, :vnum, :src, :pjson);
-    """), {"pid": plan_id, "vnum": vnum, "src": source, "pjson": pjson})
+    plan_repository.insert_plan_version(db, plan_id, vnum, source, pjson)
     db.commit()
     return {"plan_id": plan_id, "version_number": vnum, "source": source}
 
 
 def get_plan(db: Session, plan_id: int) -> dict[str, Any] | None:
-    row = db.execute(text("""
-        SELECT id, student_id, assessment_id, measurement_id, generated_plan_json, plan_json,
-               llm_call_id, edit_count, created_at, updated_at
-        FROM plans WHERE id = :pid;
-    """), {"pid": plan_id}).mappings().one_or_none()
+    row = plan_repository.select_plan_by_id(db, plan_id)
     return dict(row) if row else None
 
 
 def get_student_plans(db: Session, student_id: int) -> list[dict[str, Any]]:
-    rows = db.execute(text("""
-        SELECT id, student_id, assessment_id, measurement_id, generated_plan_json, plan_json,
-               llm_call_id, edit_count, created_at, updated_at
-        FROM plans WHERE student_id = :sid ORDER BY id DESC;
-    """), {"sid": student_id}).mappings().all()
+    rows = plan_repository.select_plans_by_student(db, student_id)
     return [dict(r) for r in rows]
 
 
+def get_current_student_plan(db: Session, student_id: int) -> dict[str, Any] | None:
+    row = plan_repository.select_current_plan_by_student(db, student_id)
+    return dict(row) if row else None
+
+
 def delete_plan(db: Session, plan_id: int) -> bool:
-    res = db.execute(text("DELETE FROM plans WHERE id = :id;"), {"id": plan_id})
+    row = plan_repository.select_plan_student_id(db, plan_id)
+    if row is None:
+        return False
+    rowcount = plan_repository.delete_plan_by_id(db, plan_id)
+    _reassign_current_plan_after_delete(db, row["student_id"], plan_id)
     db.commit()
-    return res.rowcount > 0
+    return rowcount > 0

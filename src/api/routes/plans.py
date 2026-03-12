@@ -10,10 +10,17 @@ from src.services.plan_service import (
     create_plan_from_llm,
     update_plan,
     get_plan,
+    get_current_student_plan,
     get_student_plans,
     delete_plan,
 )
-from src.services.plan_analysis_service import analyze_plan_differences, get_professor_edit_patterns
+from src.services.plan_analysis_service import (
+    analyze_plan_differences,
+    build_student_plan_mcp_context,
+    get_professor_edit_patterns,
+    get_plan_comparison,
+    get_professor_learning_diagnostics,
+)
 
 router = APIRouter(prefix="/plans", tags=["plans"])
 
@@ -62,6 +69,24 @@ def get_edit_patterns_route(student_id: int | None = None, db: Session = Depends
     return get_professor_edit_patterns(db, student_id)
 
 
+@router.get("/learning-diagnostics")
+def get_learning_diagnostics_route(student_id: int | None = None, db: Session = Depends(get_db)):
+    return get_professor_learning_diagnostics(db, student_id)
+
+
+@router.get("/student/{student_id}/current", response_model=PlanOut)
+def get_current_plan_route(student_id: int, db: Session = Depends(get_db)):
+    plan = get_current_student_plan(db, student_id)
+    if plan is None:
+        raise HTTPException(status_code=404, detail="Current plan not found")
+    return plan
+
+
+@router.get("/student/{student_id}/mcp-context")
+def get_student_plan_mcp_context_route(student_id: int, db: Session = Depends(get_db)):
+    return build_student_plan_mcp_context(db, student_id)
+
+
 @router.get("/{plan_id}", response_model=PlanOut)
 def get_plan_route(plan_id: int, db: Session = Depends(get_db)):
     plan = get_plan(db, plan_id)
@@ -101,3 +126,9 @@ def get_plan_analysis(plan_id: int, db: Session = Depends(get_db)):
     return result
 
 
+@router.get("/{plan_id}/comparison")
+def get_plan_comparison_route(plan_id: int, db: Session = Depends(get_db)):
+    comparison = get_plan_comparison(db, plan_id)
+    if comparison is None:
+        raise HTTPException(status_code=404, detail="Comparison not found")
+    return comparison

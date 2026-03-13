@@ -5,6 +5,8 @@ import hashlib
 import json
 import logging
 import time
+from datetime import date, datetime
+from decimal import Decimal
 from typing import Any
 
 from dotenv import load_dotenv
@@ -28,6 +30,19 @@ class LLMGenerator:
 
     def _hash(self, value: str) -> str:
         return hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
+
+    def _json_safe(self, value: Any) -> Any:
+        if isinstance(value, dict):
+            return {key: self._json_safe(inner) for key, inner in value.items()}
+        if isinstance(value, list):
+            return [self._json_safe(item) for item in value]
+        if isinstance(value, tuple):
+            return [self._json_safe(item) for item in value]
+        if isinstance(value, (datetime, date)):
+            return value.isoformat()
+        if isinstance(value, Decimal):
+            return float(value)
+        return value
 
     def _build_prompt(self, bundle: dict[str, Any]) -> str:
         """
@@ -160,7 +175,7 @@ class LLMGenerator:
             user_payload["aprendizado_do_professor"] = learning
         
 
-        return f"[SYSTEM]\n{system}\n[USER]\n{json.dumps(user_payload, ensure_ascii=False)}"
+        return f"[SYSTEM]\n{system}\n[USER]\n{json.dumps(self._json_safe(user_payload), ensure_ascii=False)}"
 
     def _build_repair_prompt(self, original_prompt: str, plan: dict[str, Any], bundle: dict[str, Any]) -> str:
         assessment = (bundle.get("generation_context") or bundle).get("assessment") or {}
@@ -173,7 +188,7 @@ class LLMGenerator:
             "Cada dia precisa ter no minimo 4 exercicios validos.\n"
             "Reescreva o JSON inteiro mantendo seguranca, objetivo e restricoes.\n"
             "Nao devolva um resumo. Nao devolva explicacoes. Apenas um JSON completo.\n"
-            f"JSON anterior insuficiente: {json.dumps(plan, ensure_ascii=False)}"
+            f"JSON anterior insuficiente: {json.dumps(self._json_safe(plan), ensure_ascii=False)}"
         )
 
     def _plan_quality(self, plan: dict[str, Any], bundle: dict[str, Any]) -> tuple[bool, dict[str, Any]]:

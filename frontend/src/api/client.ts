@@ -1,10 +1,24 @@
 const BASE = '/api'
 
+function getToken() {
+  return localStorage.getItem('fitness-gen-token')
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    ...options,
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
-  })
+  const token = getToken()
+  let res: Response
+  try {
+    res = await fetch(`${BASE}${path}`, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...options?.headers,
+      },
+    })
+  } catch {
+    throw new Error('Nao foi possivel conectar ao servidor. Confira se o backend esta ativo.')
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
     throw new Error(err.detail || res.statusText)
@@ -14,6 +28,19 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  auth: {
+    register: (data: { name: string; email: string; password: string }) =>
+      request<import('../types').AuthResponse>('/auth/register', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    login: (data: { email: string; password: string }) =>
+      request<import('../types').AuthResponse>('/auth/login', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    me: () => request<import('../types').Teacher>('/auth/me'),
+  },
   students: {
     list: () => request<import('../types').Student[]>('/students'),
     get: (id: number) => request<import('../types').Student>(`/students/${id}`),
@@ -25,7 +52,7 @@ export const api = {
   assessments: {
     list: (studentId: number) => request<import('../types').Assessment[]>(`/assessments/student/${studentId}`),
     get: (id: number) => request<import('../types').Assessment>(`/assessments/${id}`),
-    create: (data: Partial<import('../types').Assessment> & { student_id: number }) =>
+    create: (data: import('../types').AssessmentInput) =>
       request<import('../types').Assessment>('/assessments', { method: 'POST', body: JSON.stringify(data) }),
     update: (id: number, data: Partial<import('../types').Assessment>) =>
       request<import('../types').Assessment>(`/assessments/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
@@ -33,7 +60,7 @@ export const api = {
   measurements: {
     list: (studentId: number) => request<import('../types').Measurement[]>(`/measurements/student/${studentId}`),
     get: (id: number) => request<import('../types').Measurement>(`/measurements/${id}`),
-    create: (data: Omit<import('../types').Measurement, 'id' | 'bmi' | 'created_at'>) =>
+    create: (data: import('../types').MeasurementInput) =>
       request<import('../types').Measurement>('/measurements', { method: 'POST', body: JSON.stringify(data) }),
     update: (id: number, data: Partial<import('../types').Measurement>) =>
       request<import('../types').Measurement>(`/measurements/${id}`, { method: 'PUT', body: JSON.stringify(data) }),

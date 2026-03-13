@@ -1,9 +1,15 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../api/client'
-import type { Student, Assessment, Measurement, Plan } from '../types'
-
-type Tab = 'overview' | 'anamnesis' | 'assessments' | 'measurements' | 'plans'
+import type { Assessment, Measurement, Plan, Student } from '../types'
+import {
+  getLatestAssessment,
+  getLatestMeasurement,
+  getStatusMessage,
+  getStatusTone,
+  getStudentSetupStatus,
+  isStudentReadyForPlan,
+} from '../utils/studentFlow'
 
 export function StudentDetail() {
   const { studentId } = useParams<{ studentId: string }>()
@@ -18,143 +24,179 @@ export function StudentDetail() {
 
   useEffect(() => {
     if (!id) return
+
     Promise.all([
       api.students.get(id),
       api.assessments.list(id),
       api.measurements.list(id),
       api.plans.list(id),
     ])
-      .then(([s, a, m, p]) => {
-        setStudent(s)
-        setAssessments(a)
-        setMeasurements(m)
-        setPlans(p)
+      .then(([studentResult, assessmentsResult, measurementsResult, plansResult]) => {
+        setStudent(studentResult)
+        setAssessments(assessmentsResult)
+        setMeasurements(measurementsResult)
+        setPlans(plansResult)
       })
-      .catch((e) => setError(e.message))
+      .catch((requestError) => setError(requestError.message))
       .finally(() => setLoading(false))
   }, [id])
 
-  if (loading) return <p style={{ color: '#888' }}>Carregando...</p>
-  if (error || !student) return <p style={{ color: '#e94560' }}>Erro: {error || 'Aluno não encontrado'}</p>
+  if (loading) return <p className="status-text">Carregando aluno...</p>
+  if (error || !student) return <p className="status-text error">Erro: {error || 'Aluno nao encontrado'}</p>
 
-  const [activeTab, setActiveTab] = useState<Tab>('overview')
-  const tabs: { key: Tab; label: string }[] = [
-    { key: 'overview', label: 'Visão geral' },
-    { key: 'anamnesis', label: 'Anamnese' },
-    { key: 'assessments', label: 'Avaliações' },
-    { key: 'measurements', label: 'Medições' },
-    { key: 'plans', label: 'Planos' },
-  ]
+  const latestAssessment = getLatestAssessment(assessments)
+  const latestMeasurement = getLatestMeasurement(measurements)
+  const status = getStudentSetupStatus(assessments, measurements)
+  const tone = getStatusTone(status)
+  const ready = isStudentReadyForPlan(assessments, measurements)
 
   return (
-    <div>
-      <div style={{ marginBottom: '1.5rem' }}>
-        <Link to="/students" style={{ color: '#888', textDecoration: 'none', fontSize: 14 }}>← Alunos</Link>
-        <h1 style={{ color: '#eee', marginTop: '0.5rem' }}>{student.name}</h1>
-        <p style={{ color: '#888' }}>CPF: {student.cpf} | Idade: {student.age} | {student.email || '-'}</p>
-      </div>
+    <div className="content-stack student-page">
+      <section className="page-heading-card compact-hero">
+        <div>
+          <div className="breadcrumb">
+            <Link to="/dashboard">Painel</Link>
+            <span>/</span>
+            <Link to="/students">Alunos</Link>
+            <span>/</span>
+            <strong>{student.name}</strong>
+          </div>
+          <span className="eyebrow">Aluno</span>
+          <h1>{student.name}</h1>
+          <p>{getStatusMessage(status)}</p>
+        </div>
 
-      <nav style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem', borderBottom: '1px solid #333' }}>
-        {tabs.map(({ key, label }) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => setActiveTab(key)}
-            style={{
-              padding: '0.75rem 1rem',
-              background: 'none',
-              border: 'none',
-              color: activeTab === key ? '#e94560' : '#888',
-              cursor: 'pointer',
-              borderBottom: activeTab === key ? '2px solid #e94560' : '2px solid transparent',
-              marginBottom: -1,
-            }}
+        <div className="section-actions">
+          <Link to={`/students/${student.id}/onboarding`} className="btn-secondary">Completar cadastro</Link>
+          <Link
+            to={`/students/${student.id}/plan/new`}
+            className="btn-primary"
+            aria-disabled={!ready}
           >
-            {label}
-          </button>
-        ))}
-      </nav>
+            {ready ? 'Gerar plano com IA' : 'Revisar pendencias'}
+          </Link>
+        </div>
+      </section>
 
-      <TabContent
-        tab={activeTab}
-        student={student}
-        assessments={assessments}
-        measurements={measurements}
-        plans={plans}
-      />
+      <section className="student-overview-layout">
+        <div className="content-stack">
+          <section className="detail-grid">
+            <article className="info-card">
+              <span className="eyebrow">Dados basicos</span>
+              <h3>Identificacao</h3>
+              <p><strong>CPF:</strong> {student.cpf}</p>
+              <p><strong>Idade:</strong> {student.age} anos</p>
+              <p><strong>Email:</strong> {student.email || '-'}</p>
+              <p><strong>Telefone:</strong> {student.phone || '-'}</p>
+            </article>
+
+            <article className={`info-card status-card ${tone}`}>
+              <span className="eyebrow">Status do cadastro</span>
+              <h3>{status}</h3>
+              <p>{getStatusMessage(status)}</p>
+              <div className="indicator-list">
+                <div className={assessments.length > 0 ? 'indicator-row active' : 'indicator-row'}>
+                  <span className="indicator-dot" />
+                  <span>Assessment disponivel</span>
+                </div>
+                <div className={measurements.length > 0 ? 'indicator-row active' : 'indicator-row'}>
+                  <span className="indicator-dot" />
+                  <span>Measurements disponiveis</span>
+                </div>
+                <div className={ready ? 'indicator-row active' : 'indicator-row'}>
+                  <span className="indicator-dot" />
+                  <span>Pronto para gerar plano</span>
+                </div>
+              </div>
+            </article>
+          </section>
+
+          <section className="detail-grid">
+            <article className="info-card">
+              <div className="section-title-row">
+              <div>
+                <span className="eyebrow">Assessment mais recente</span>
+                  <h3>Contexto de treino</h3>
+                </div>
+                <Link to={`/students/${student.id}/onboarding#assessment`} className="btn-secondary">
+                  {latestAssessment ? 'Atualizar assessment' : 'Preencher assessment'}
+                </Link>
+              </div>
+              {latestAssessment ? (
+                <>
+                  <p><strong>Nivel:</strong> {latestAssessment.level || '-'}</p>
+                  <p><strong>Frequencia semanal:</strong> {latestAssessment.freq_per_week ?? '-'}x</p>
+                  <p><strong>Tempo por sessao:</strong> {latestAssessment.session_time_min ?? '-'} min</p>
+                  <p><strong>Observacoes:</strong> {latestAssessment.case_notes || 'Sem observacoes registradas.'}</p>
+                </>
+              ) : (
+                <p>Nenhum assessment cadastrado ainda. Complete esta etapa antes de gerar o plano.</p>
+              )}
+            </article>
+
+            <article className="info-card">
+              <div className="section-title-row">
+              <div>
+                <span className="eyebrow">Measurements mais recentes</span>
+                  <h3>Dados corporais</h3>
+                </div>
+                <Link to={`/students/${student.id}/onboarding#measurement`} className="btn-secondary">
+                  {latestMeasurement ? 'Atualizar measurements' : 'Preencher measurements'}
+                </Link>
+              </div>
+              {latestMeasurement ? (
+                <>
+                  <p><strong>Peso:</strong> {latestMeasurement.weight_kg ?? '-'} kg</p>
+                  <p><strong>Altura:</strong> {latestMeasurement.height_m ?? '-'} m</p>
+                  <p><strong>Gordura corporal:</strong> {latestMeasurement.body_fat_percent ?? '-'}%</p>
+                  <p><strong>IMC:</strong> {latestMeasurement.bmi ?? '-'}</p>
+                </>
+              ) : (
+                <p>Nenhuma measurement cadastrada ainda. Sem isso o professor nao deve gerar plano.</p>
+              )}
+            </article>
+          </section>
+        </div>
+
+        <aside className="sidebar-rail">
+          <div className="content-stack">
+          <article className="info-card">
+            <span className="eyebrow">Resumo geral</span>
+            <h3>Progresso do aluno</h3>
+            <div className="metric-list">
+              <div>
+                <span>Assessments</span>
+                <strong>{assessments.length}</strong>
+              </div>
+              <div>
+                <span>Measurements</span>
+                <strong>{measurements.length}</strong>
+              </div>
+              <div>
+                <span>Planos</span>
+                <strong>{plans.length}</strong>
+              </div>
+            </div>
+          </article>
+
+          <article className="info-card">
+            <span className="eyebrow">Proximo passo</span>
+            <h3>{ready ? 'Gerar plano com IA' : 'Completar cadastro'}</h3>
+            <p>
+              {ready
+                ? 'Assessment e measurements ja existem. O workspace de geracao vai abrir com os ultimos dados selecionados.'
+                : 'Use o fluxo de onboarding para preencher os dados faltantes e liberar a geracao do plano.'}
+            </p>
+            <div className="content-stack compact">
+              <Link to={`/students/${student.id}/onboarding`} className="btn-secondary">Abrir onboarding</Link>
+              <Link to={`/students/${student.id}/plan/new`} className="btn-primary">
+                {ready ? 'Abrir geracao de plano' : 'Ver pendencias'}
+              </Link>
+            </div>
+          </article>
+          </div>
+        </aside>
+      </section>
     </div>
   )
-}
-
-function TabContent({ tab, student, assessments, measurements, plans }: {
-  tab: Tab
-  student: Student
-  assessments: Assessment[]
-  measurements: Measurement[]
-  plans: Plan[]
-}) {
-  switch (tab) {
-    case 'overview':
-      return (
-        <div style={{ color: '#aaa' }}>
-          <p><strong style={{ color: '#eee' }}>Nome:</strong> {student.name}</p>
-          <p><strong style={{ color: '#eee' }}>CPF:</strong> {student.cpf}</p>
-          <p><strong style={{ color: '#eee' }}>Idade:</strong> {student.age}</p>
-          <p><strong style={{ color: '#eee' }}>Email:</strong> {student.email || '-'}</p>
-          <p><strong style={{ color: '#eee' }}>Telefone:</strong> {student.phone || '-'}</p>
-          <p><strong style={{ color: '#eee' }}>Avaliações:</strong> {assessments.length}</p>
-          <p><strong style={{ color: '#eee' }}>Medições:</strong> {measurements.length}</p>
-          <p><strong style={{ color: '#eee' }}>Planos:</strong> {plans.length}</p>
-        </div>
-      )
-    case 'assessments':
-      return (
-        <div>
-          <p style={{ color: '#888' }}>Total: {assessments.length} avaliação(ões)</p>
-          {assessments.length === 0 && <p style={{ color: '#888' }}>Nenhuma avaliação.</p>}
-          {assessments.map((a) => (
-            <div key={a.id} style={{ padding: '1rem', background: '#1a1a2e', borderRadius: 8, marginBottom: '0.5rem', border: '1px solid #333' }}>
-              <p style={{ color: '#eee' }}>ID {a.id} | Nível: {a.level || '-'} | Freq/sem: {a.freq_per_week ?? '-'}</p>
-            </div>
-          ))}
-        </div>
-      )
-    case 'measurements':
-      return (
-        <div>
-          <p style={{ color: '#888' }}>Total: {measurements.length} medição(ões)</p>
-          {measurements.length === 0 && <p style={{ color: '#888' }}>Nenhuma medição.</p>}
-          {measurements.map((m) => (
-            <div key={m.id} style={{ padding: '1rem', background: '#1a1a2e', borderRadius: 8, marginBottom: '0.5rem', border: '1px solid #333' }}>
-              <p style={{ color: '#eee' }}>ID {m.id} | Peso: {m.weight_kg ?? '-'} kg | Altura: {m.height_m ?? '-'} m | IMC: {m.bmi ?? '-'}</p>
-            </div>
-          ))}
-        </div>
-      )
-    case 'plans':
-      return (
-        <div>
-          <Link to={`/students/${student.id}/plan/new`} style={{
-            display: 'inline-block',
-            marginBottom: '1rem',
-            padding: '0.5rem 1rem',
-            background: '#e94560',
-            color: '#fff',
-            textDecoration: 'none',
-            borderRadius: 4,
-          }}>Gerar novo plano</Link>
-          {plans.length === 0 && <p style={{ color: '#888' }}>Nenhum plano.</p>}
-          {plans.map((p) => (
-            <div key={p.id} style={{ padding: '1rem', background: '#1a1a2e', borderRadius: 8, marginBottom: '0.5rem', border: '1px solid #333', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ color: '#eee' }}>Plano #{p.id} | Split: {p.plan_json?.plan_meta?.split || '-'}</span>
-              <Link to={`/plans/${p.id}/edit`} style={{ color: '#e94560', textDecoration: 'none' }}>Editar</Link>
-            </div>
-          ))}
-        </div>
-      )
-    case 'anamnesis':
-      return <p style={{ color: '#888' }}>Anamnese integrada às avaliações.</p>
-    default:
-      return null
-  }
 }

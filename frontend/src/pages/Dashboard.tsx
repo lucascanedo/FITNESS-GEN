@@ -1,29 +1,39 @@
 import { Link } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext'
 
 export function Dashboard() {
+  const { teacher } = useAuth()
+
   return (
-    <div>
-      <h1 style={{ marginBottom: '1rem', color: '#eee' }}>Dashboard</h1>
-      <p style={{ color: '#888', marginBottom: '2rem' }}>
-        Bem-vindo ao Fitness Gen. Gerencie seus alunos, anamneses, medições e planos de treino.
-      </p>
-      <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-        <Link to="/students" style={{
-          padding: '1rem 1.5rem',
-          background: '#1a1a2e',
-          borderRadius: 8,
-          color: '#e94560',
-          textDecoration: 'none',
-          border: '1px solid #333',
-        }}>Ver alunos</Link>
-        <Link to="/students/new" style={{
-          padding: '1rem 1.5rem',
-          background: '#e94560',
-          borderRadius: 8,
-          color: '#fff',
-          textDecoration: 'none',
-        }}>Novo aluno</Link>
-      </div>
+    <div className="content-stack">
+      <section className="hero-card">
+        <div>
+          <span className="eyebrow">Dashboard</span>
+          <h1>Ola, {teacher?.name?.split(' ')[0] || 'Professor'}.</h1>
+          <p>
+            Painel inicial para seguir direto para os alunos ou iniciar um novo cadastro
+            sem adicionar complexidade desnecessaria nesta etapa.
+          </p>
+        </div>
+
+        <div className="hero-actions">
+          <Link to="/students" className="btn-primary">Acessar alunos</Link>
+          <Link to="/students/new" className="btn-secondary">Cadastrar aluno</Link>
+        </div>
+      </section>
+
+      <section className="dashboard-grid">
+        <Link to="/students" className="feature-card">
+          <span className="feature-kicker">Gestao</span>
+          <h3>Base de alunos</h3>
+          <p>Lista responsiva com acesso ao detalhe do aluno e atalho para criacao de plano.</p>
+        </Link>
+        <Link to="/students/new" className="feature-card accent">
+          <span className="feature-kicker">Cadastro</span>
+          <h3>Novo aluno</h3>
+          <p>Formulario inicial estruturado para receber depois assessment e measurement.</p>
+        </Link>
+      </section>
     </div>
   )
 }

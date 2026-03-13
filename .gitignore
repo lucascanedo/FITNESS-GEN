@@ -15,3 +15,4 @@ wheels/
 
 # Frontend artifacts
 frontend/node_modules/
+frontend/tsconfig.tsbuildinfo

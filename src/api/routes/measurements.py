@@ -16,7 +16,7 @@ router = APIRouter(prefix="/measurements", tags=["measurements"])
 
 @router.post("/", response_model=MeasurementOut, status_code=status.HTTP_201_CREATED)
 def create_measurement_route(payload: MeasurementCreate, db: Session = Depends(get_db)):
-    return create_measurement(db, payload.model_dump(exclude_unset=True))
+    return create_measurement(db, payload.model_dump())
 
 
 @router.get("/student/{student_id}", response_model=list[MeasurementOut])
@@ -34,7 +34,7 @@ def get_measurement_route(measurement_id: int, db: Session = Depends(get_db)):
 
 @router.put("/{measurement_id}", response_model=MeasurementOut)
 def update_measurement_route(measurement_id: int, payload: MeasurementUpdate, db: Session = Depends(get_db)):
-    return update_measurement(db, measurement_id, payload.model_dump(exclude_unset=True))
+    return update_measurement(db, measurement_id, payload.model_dump())
 
 
 @router.delete("/{measurement_id}", status_code=status.HTTP_204_NO_CONTENT)

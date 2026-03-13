@@ -17,7 +17,7 @@ router = APIRouter(prefix="/assessments", tags=["assessments"])
 
 @router.post("/", response_model=AssessmentOut, status_code=status.HTTP_201_CREATED)
 def create_assessment_route(payload: AssessmentCreate, db: Session = Depends(get_db)):
-    return create_assessment(db, payload.model_dump(exclude_unset=True))
+    return create_assessment(db, payload.model_dump())
 
 
 @router.get("/student/{student_id}", response_model=list[AssessmentOut])
@@ -35,7 +35,7 @@ def get_assessment_route(assessment_id: int, db: Session = Depends(get_db)):
 
 @router.put("/{assessment_id}", response_model=AssessmentOut)
 def update_assessment_route(assessment_id: int, payload: AssessmentUpdate, db: Session = Depends(get_db)):
-    return update_assessment(db, assessment_id, payload.model_dump(exclude_unset=True))
+    return update_assessment(db, assessment_id, payload.model_dump())
 
 
 @router.delete("/{assessment_id}", status_code=status.HTTP_204_NO_CONTENT)

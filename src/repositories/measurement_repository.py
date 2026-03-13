@@ -13,7 +13,7 @@ def insert_measurement(db: Session, data: dict[str, Any]):
             muscle_mass_kg, source, notes
         )
         VALUES (
-            :student_id, :measured_at, :height_m, :weight_kg, :body_fat_percent,
+            :student_id, COALESCE(:measured_at, CURRENT_TIMESTAMP), :height_m, :weight_kg, :body_fat_percent,
             :muscle_mass_kg, :source, :notes
         )
         RETURNING id, student_id, measured_at, height_m, weight_kg,

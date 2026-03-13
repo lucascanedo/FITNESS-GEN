@@ -10,6 +10,21 @@ export interface Student {
   created_at: string
 }
 
+export interface Teacher {
+  id: number
+  name: string
+  email: string
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface AuthResponse {
+  access_token: string
+  token_type: 'bearer'
+  teacher: Teacher
+}
+
 export interface Assessment {
   id: number
   student_id: number
@@ -31,6 +46,25 @@ export interface Assessment {
   created_at: string
 }
 
+export interface AssessmentInput {
+  student_id: number
+  measurement_id?: number
+  objectives?: Record<string, unknown>
+  posture?: Record<string, unknown>
+  injuries?: Record<string, unknown>
+  restrictions?: Record<string, unknown>
+  history?: Record<string, unknown>
+  level?: string
+  freq_per_week?: number
+  session_time_min?: number
+  case_notes?: string
+  equipment?: Record<string, unknown>
+  red_flags?: Record<string, unknown>
+  readiness?: Record<string, unknown>
+  periodization?: Record<string, unknown>
+  status?: string
+}
+
 export interface Measurement {
   id: number
   student_id: number
@@ -43,6 +77,17 @@ export interface Measurement {
   source?: string
   notes?: string
   created_at: string
+}
+
+export interface MeasurementInput {
+  student_id: number
+  measured_at?: string
+  height_m?: number
+  weight_kg?: number
+  body_fat_percent?: number
+  muscle_mass_kg?: number
+  source?: string
+  notes?: string
 }
 
 export interface PlanMeta {

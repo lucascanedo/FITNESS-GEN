@@ -1,8 +1,8 @@
-import { Outlet, Link, useNavigate } from 'react-router-dom'
+import { Outlet, Link, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 
 export function Layout() {
-  const { logout } = useAuth()
+  const { logout, teacher } = useAuth()
   const navigate = useNavigate()
 
   const handleLogout = () => {
@@ -11,33 +11,39 @@ export function Layout() {
   }
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-      <header style={{
-        padding: '1rem 2rem',
-        background: '#1a1a2e',
-        color: '#eee',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '2rem',
-      }}>
-        <Link to="/dashboard" style={{ color: '#eee', textDecoration: 'none', fontWeight: 'bold' }}>
-          Fitness Gen
-        </Link>
-        <nav style={{ display: 'flex', gap: '1rem' }}>
-          <Link to="/students" style={{ color: '#aaa', textDecoration: 'none' }}>Alunos</Link>
+    <div className="app-shell">
+      <header className="topbar">
+        <div className="brand-block">
+          <Link to="/dashboard" className="brand-link">
+            Fitness Gen
+          </Link>
+          <span className="brand-tag">Professor workspace</span>
+        </div>
+
+        <nav className="topbar-nav">
+          <NavLink to="/dashboard" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+            Dashboard
+          </NavLink>
+          <NavLink to="/students" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+            Alunos
+          </NavLink>
+          <NavLink to="/students/new" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+            Cadastrar aluno
+          </NavLink>
         </nav>
-        <div style={{ marginLeft: 'auto' }}>
-          <button onClick={handleLogout} style={{
-            padding: '0.5rem 1rem',
-            background: '#333',
-            color: '#eee',
-            border: '1px solid #555',
-            borderRadius: 4,
-            cursor: 'pointer',
-          }}>Sair</button>
+
+        <div className="topbar-actions">
+          <div className="teacher-badge">
+            <span>{teacher?.name}</span>
+            <small>{teacher?.email}</small>
+          </div>
+          <button onClick={handleLogout} className="btn-secondary" type="button">
+            Sair
+          </button>
         </div>
       </header>
-      <main style={{ flex: 1, padding: '2rem' }}>
+
+      <main className="app-main">
         <Outlet />
       </main>
     </div>

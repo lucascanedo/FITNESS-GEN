@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from src.api.routes.assessments import router as assessments_router
+from src.api.routes.auth import router as auth_router
 from src.api.routes.llm import router as llm_router
 from src.api.routes.measurements import router as measurements_router
 from src.api.routes.plans import router as plans_router
@@ -67,4 +68,5 @@ app.include_router(measurements_router)
 app.include_router(assessments_router)
 app.include_router(plans_router)
 app.include_router(llm_router)
+app.include_router(auth_router)
 app.add_middleware(RequestContextMiddleware)

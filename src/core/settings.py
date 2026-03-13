@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     # CORS
     ALLOWED_ORIGINS: str = "*"
 
+    # Auth
+    AUTH_SECRET_KEY: str = "fitness-gen-dev-secret-change-me"
+    AUTH_TOKEN_EXPIRES_MINUTES: int = 480
+
     @property
     def project_root(self) -> Path:
         return ENV_PATH.parent

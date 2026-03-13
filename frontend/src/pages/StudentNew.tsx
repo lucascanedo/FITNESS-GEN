@@ -42,11 +42,11 @@ export function StudentNew() {
   const validate = (): boolean => {
     const e: Record<string, string> = {}
     const nameFull = `${nome} ${sobrenome}`.trim()
-    if (!nameFull) e.name = 'Nome e sobrenome são obrigatórios'
+    if (!nameFull) e.name = 'Nome e sobrenome sao obrigatorios'
     const cpfRes = validateCPF(cpf)
     if (!cpfRes.valid) e.cpf = cpfRes.message!
     const birthIso = parseDateBRToISO(birthDate)
-    if (!birthIso || birthDate.replace(/\D/g, '').length !== 8) e.birthDate = 'Data inválida (dd/mm/aaaa)'
+    if (!birthIso || birthDate.replace(/\D/g, '').length !== 8) e.birthDate = 'Data invalida (dd/mm/aaaa)'
     const emailRes = validateEmail(email)
     if (!emailRes.valid) e.email = emailRes.message!
     setErrors(e)
@@ -68,16 +68,20 @@ export function StudentNew() {
       email: email.trim() || undefined,
       phone: phone.replace(/\D/g, '') || undefined,
     })
-      .then((s) => navigate(`/students/${s.id}`))
+      .then((s) => navigate(`/students/${s.id}/onboarding`))
       .catch((err) => setSubmitError(err.message))
       .finally(() => setLoading(false))
   }
 
   return (
-    <div className="page student-new">
-      <div className="page-header">
-        <h1>Novo aluno</h1>
-        <button type="button" onClick={fillExample} className="btn-ghost">
+    <div className="content-stack narrow">
+      <div className="section-header-card">
+        <div>
+          <span className="eyebrow">Cadastro</span>
+          <h1>Novo aluno</h1>
+          <p>Formulario base organizado para evoluir depois com assessment e measurement sem retrabalho.</p>
+        </div>
+        <button type="button" onClick={fillExample} className="btn-secondary">
           Preencher com exemplo
         </button>
       </div>
